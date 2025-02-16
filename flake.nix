@@ -30,6 +30,7 @@
         nativeBuildInputs = with pkgs; [
           addlicense
           nushell
+          ripgrep
         ];
       };
     });

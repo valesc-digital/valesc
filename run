@@ -9,13 +9,13 @@ def main [] {
 def "main gitignore generate" [] {
     log info "Building new global '.gitignore' file"
 
-    let main_gitignore_file_path = from-root ".gitignore"
+    let main_gitignore_file_path = constants from-root ".gitignore"
     rm -f $main_gitignore_file_path
 
     "### WARNING: MACHINE GENERATED FILE, DO NOT EDIT!!!\n" | save --append $main_gitignore_file_path
     "### To generate this file run `./run gitignore generate` at the root of the monorepo\n" | save --append $main_gitignore_file_path
 
-    let gitignore_fragments_path = from-root "meta/gitignore.d"
+    let gitignore_fragments_path = constants from-root "meta/gitignore.d"
     ls ...(glob $"($gitignore_fragments_path)/**/*.gitignore") | each { |gitignore_fragment_path|
         let fragment_name = $gitignore_fragment_path.name
             | path basename
