@@ -31,6 +31,10 @@
           addlicense
           nushell
           ripgrep
+          cargo-deny
+          rustup
+          # TODO: Should be removed?
+          reuse
         ];
       };
     });

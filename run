@@ -35,3 +35,12 @@ def "main gitignore generate" [] {
 def "main tracking list" [] {
     tracking list
 }
+
+def "main todo" [] {
+    rg --glob "!/run" "TODO: "
+    rg --glob "!/run" "CHECK: "
+    rg --glob "!/run" "FIXME: "
+}
+
+def "main license add-headers" [] {
+}

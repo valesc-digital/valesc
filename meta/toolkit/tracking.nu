@@ -4,8 +4,9 @@ use constants.nu
 def get-track-entries []: nothing -> list<string> {
     cd $ROOT_PATH
 
-    # CHECK: This will not work if we want to add TRACK information in this file.
-    # A proper CLI tracking tool should be made in the future.
+    # CHECK: This will not work if we want to add TRACK information in this file
+    # A proper CLI tracking tool should be made in the future, also removing the
+    # need for the `/run todo` subcommand
     rg "TRACK: " --json --glob $"!/meta/toolkit/tracking.nu"
         | lines
         | each {|entry| $entry |from json}
@@ -23,7 +24,7 @@ def handle-url [url_text: string]: nothing -> string {
         return $url_text    
     }
     
-    # Good candidate for record destructuring in the future.
+    # Good candidate for record destructuring in the future
     # TRACK: https://github.com/nushell/nushell/issues/6021
     let issue_data = $url | get path | parse "/{owner}/{repo}/issues/{id}"
 
