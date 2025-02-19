@@ -1,0 +1,11 @@
+SPDX-License-Identifier: MPL-2.0 AND CC0-1.0
+
+Copyrights in the VALESC Group projects are retained by their contributors. No
+copyright assignment is required to contribute to the VALESC Group projects.
+
+Some files include explicit copyright notices and/or license notices.
+
+All files are licensed under the Mozilla Public License Version 2.0 <LICENSES/MPL-2.0.txt> or <https://www.mozilla.org/en-US/MPL/2.0/> with the SPDX license identifier "MPL-2.0" unless noted further down in this document.
+
+The following folders and all the content inside of them are exceptionally licensed under the CC0 license <LICENSES/CC0-1.0.txt> or <https://creativecommons.org/public-domain/cc0/> with the SPDX license identifier "CC0-1.0":
+- /meta/gitignore.d/
