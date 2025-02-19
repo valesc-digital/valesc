@@ -43,4 +43,5 @@ def "main todo" [] {
 }
 
 def "main license add-headers" [] {
+    addlicense -s -l mpl ...(glob **/* --exclude [meta/gitignore.d/**, .git/**])
 }
