@@ -2,10 +2,11 @@ use std::io::{Read, Seek};
 use std::io;
 use thiserror::Error;
 
-const BYTES_ON_KIBIBYTE: usize = 1024;
+pub const BYTES_ON_KIBIBYTE: usize = 1024;
 
 pub struct InesFile {
     pub prg_rom: Vec<u8>,
+    pub prg_rom_size: usize,
 }
 
 #[derive(Debug, Error)]
@@ -36,17 +37,16 @@ impl InesFile {
         reader.read_exact(&mut prg_rom_size)?;
 
         let prg_rom_size =  prg_rom_size[0] as usize * 16 * BYTES_ON_KIBIBYTE;
-        println!("{prg_rom_size}");
+        println!("PRG ROM SIZE:{prg_rom_size}");
 
         let mut prg_rom = vec![0u8; prg_rom_size];
         
         reader.seek(io::SeekFrom::Start(16))?;
         reader.read_exact(&mut prg_rom)?;
 
-        println!("{prg_rom:?}");
-
         Ok(Self {
-            prg_rom
+            prg_rom,
+            prg_rom_size,
         })
     }
 }
