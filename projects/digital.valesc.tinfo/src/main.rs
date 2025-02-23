@@ -126,6 +126,8 @@ impl Cpu {
             0xB0 => self.branch_if_carry_set(arg_1),
             0x90 => self.branch_if_carry_clear(arg_1),
             0xEA => self.no_operation(),
+            0xA9 => self.load_accumulator_immediate(arg_1),
+            0xF0 => self.branch_if_equal(arg_1),
             _ => unimplemented!()
         }
     }
@@ -194,6 +196,33 @@ impl Cpu {
 
     fn no_operation(&mut self) {
         self.program_counter += 1;
+    }
+
+    fn load_accumulator_immediate(&mut self, arg_1: u8) {
+        self.register_a = arg_1;
+
+        if arg_1 == 0 {
+            self.status |= CpuStatusFlags::Zero;
+        } else {
+            self.status -= CpuStatusFlags::Zero;
+        }
+
+        if (arg_1 as i8) < 0 {
+            self.status |= CpuStatusFlags::Negative;
+        } else {
+            self.status -= CpuStatusFlags::Negative;
+        }
+
+        self.program_counter += 2;
+    }
+
+    fn branch_if_equal(&mut self, arg_1: u8) {
+        if !self.status.contains(CpuStatusFlags::Zero) {
+            self.program_counter += 2;
+            return;
+        }
+
+        self.program_counter += arg_1 as u16;
     }
 }
 
