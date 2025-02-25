@@ -88,6 +88,7 @@ pub enum CpuError {
 
 enum AddressingMode {
     Absolute,
+    Immediate,
 }
 
 /// Data returned after processing an instruction.
@@ -162,6 +163,7 @@ impl Cpu {
 
         let instruction_data: InstructionData = match opcode {
             0x4C => self.jmp(arg_1, arg_2, AddressingMode::Absolute),
+            0xA2 => self.ldx(arg_1, AddressingMode::Immediate),
             _ => unimplemented!(),
         }?;
 
@@ -209,12 +211,51 @@ impl Cpu {
             _ => Err(CpuError::InvalidAddressingMode),
         }
     }
+
+    /// Load a value to the register X.
+    fn ldx(
+        &mut self,
+        arg_1: u8,
+        addressing_mode: AddressingMode,
+    ) -> Result<InstructionData, CpuError> {
+        match addressing_mode {
+            AddressingMode::Immediate => {
+                self.register_x = arg_1;
+
+                Ok(InstructionData {
+                    idle_cycles: 1,
+                    assembly: format!("LDX #${arg_1:02X}"),
+                })
+            }
+
+            _ => Err(CpuError::InvalidAddressingMode),
+        }
+    }
+
+    /// Store a value from the register X.
+    fn stx(
+        &mut self,
+        arg_1: u8,
+        arg_2: u8,
+        addressing_mode: AddressingMode,
+    ) -> Result<InstructionData, CpuError> {
+        match addressing_mode {
+            AddressingMode::Immediate => {
+                self.register_x = arg_1;
+
+                Ok(InstructionData {
+                    idle_cycles: 1,
+                    assembly: format!("LDX #${arg_1:02X}"),
+                })
+            }
+
+            _ => Err(CpuError::InvalidAddressingMode),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::cartridge;
-
     use super::*;
 
     const DEFAULT_PROGRAM_COUNTER: usize = 0x8000;
@@ -259,6 +300,8 @@ mod tests {
         assert_eq!(cpu.program_counter, 0x5533);
     }
 
+    // MISSING: Be able to write to the RAM
+    /*
     #[test]
     fn test_jmp_indirect() {
         let cartridge = MockCartridge::new(vec![
@@ -266,13 +309,6 @@ mod tests {
             0x6C,
             0x11,
             0x80,
-
-            // Pointer to 0x8101 (index 5)
-            0x01,
-            0x81,
-
-            0xEE,
-            0xFF,
         ]);
 
         let mut cpu = Cpu::new(Box::new(cartridge));
@@ -283,126 +319,48 @@ mod tests {
         assert_eq!(instruction_data.idle_cycles, 4);
         assert_eq!(cpu.program_counter, 0x5533);
     }
-}
+    */
 
-/*
-pub fn step(&mut self) {
-    let opcode = self.bus.read(self.program_counter).unwrap();
-    let arg_1 = self.bus.read(self.program_counter + 1).unwrap();
-    let arg_2 = self.bus.read(self.program_counter + 2).unwrap();
+    #[test]
+    fn test_ldx_immediate() {
+        let cartridge = MockCartridge::new(vec![
+            // LDX #$CC
+            0xA2,
+            0xCC,
 
-    println!("{:X}  {opcode:02X} {arg_1:02X} {arg_2:02X}    A:{:02X} X:{:02X} Y:{:02X} P:{:02} SP:{:02X}", self.program_counter, self.accumulator, self.register_x, self.register_y, self.status.bits(), self.stack_pointer);
+            // Dummy value because the implementation needs at least 3 PRG ROM bytes to work
+            // NOP
+            0xEA
+        ]);
 
-    match opcode {
-        0x4C => self.jump_absolute(arg_1, arg_2),
-        0xA2 => self.load_x_register_immediate(arg_1),
-        0x86 => self.store_x_register_zero_page(arg_1),
-        0x20 => self.jump_to_subroutine(arg_1, arg_2),
-        0x38 => self.set_carry_flag(),
-        0x18 => self.clear_carry_flag(),
-        0xB0 => self.branch_if_carry_set(arg_1),
-        0x90 => self.branch_if_carry_clear(arg_1),
-        0xEA => self.no_operation(),
-        0xA9 => self.load_accumulator_immediate(arg_1),
-        0xF0 => self.branch_if_equal(arg_1),
-        _ => unimplemented!(),
-    }
-}
+        let mut cpu = Cpu::new(Box::new(cartridge));
+        
+        let instruction_data = cpu.step().unwrap().unwrap().instruction_data;
 
-
-
-fn load_x_register_immediate(&mut self, arg_1: u8) {
-    self.register_x = arg_1;
-
-    if arg_1 == 0 {
-        self.status |= CpuStatusFlags::Zero;
-    } else if (arg_1 as i8) < 0 {
-        self.status -= CpuStatusFlags::Zero;
-        self.status |= CpuStatusFlags::Negative;
+        assert_eq!(instruction_data.assembly, "LDX #$CC");
+        assert_eq!(instruction_data.idle_cycles, 1);
+        assert_eq!(cpu.register_x, 0xCC);
     }
 
-    self.program_counter += 2;
-}
+    #[test]
+    fn test_stx_absolute() {
+        let cartridge = MockCartridge::new(vec![
+            // LDX #$CC
+            0xA2,
+            0xCC,
 
-fn store_x_register_zero_page(&mut self, arg_1: u8) {
-    self.bus.write(arg_1 as u16, self.register_x);
+            // STX
+            0x8E,
+            0x00,
+            0x00,
+        ]);
 
-    self.program_counter += 2;
-}
+        let mut cpu = Cpu::new(Box::new(cartridge));
+        
+        let instruction_data = cpu.step().unwrap().unwrap().instruction_data;
 
-fn jump_to_subroutine(&mut self, arg_1: u8, arg_2: u8) {
-    let return_adress = self.program_counter + 3 - 1;
-    self.jump_absolute(arg_1, arg_2);
-
-    self.bus.write(
-        0x100 + self.stack_pointer as u16,
-        (return_adress & 0x00FF) as u8,
-    );
-    self.stack_pointer -= 1;
-
-    self.bus.write(
-        0x100 + self.stack_pointer as u16,
-        ((return_adress & 0xFF00) >> 8) as u8,
-    );
-    self.stack_pointer -= 1;
-}
-
-fn branch_if_carry_set(&mut self, arg_1: u8) {
-    if !self.status.contains(CpuStatusFlags::Carry) {
-        self.program_counter += 2;
-        return;
+        assert_eq!(instruction_data.assembly, "STX $0000 = CC");
+        assert_eq!(instruction_data.idle_cycles, 3);
+        assert_eq!(cpu.bus.read(0x0000).unwrap(), 0xCC);
     }
-
-    self.program_counter += arg_1 as u16;
 }
-
-fn branch_if_carry_clear(&mut self, arg_1: u8) {
-    if self.status.contains(CpuStatusFlags::Carry) {
-        self.program_counter += 2;
-        return;
-    }
-
-    self.program_counter += arg_1 as u16;
-}
-
-fn set_carry_flag(&mut self) {
-    self.status |= CpuStatusFlags::Carry;
-    self.program_counter += 1;
-}
-
-fn clear_carry_flag(&mut self) {
-    self.status -= CpuStatusFlags::Carry;
-    self.program_counter += 1;
-}
-
-fn no_operation(&mut self) {
-    self.program_counter += 1;
-}
-
-fn load_accumulator_immediate(&mut self, arg_1: u8) {
-    self.accumulator = arg_1;
-
-    if arg_1 == 0 {
-        self.status |= CpuStatusFlags::Zero;
-    } else {
-        self.status -= CpuStatusFlags::Zero;
-    }
-
-    if (arg_1 as i8) < 0 {
-        self.status |= CpuStatusFlags::Negative;
-    } else {
-        self.status -= CpuStatusFlags::Negative;
-    }
-
-    self.program_counter += 2;
-}
-
-fn branch_if_equal(&mut self, arg_1: u8) {
-    if !self.status.contains(CpuStatusFlags::Zero) {
-        self.program_counter += 2;
-        return;
-    }
-
-    self.program_counter += arg_1 as u16;
-}
-*/

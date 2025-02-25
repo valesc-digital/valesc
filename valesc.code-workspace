@@ -7,5 +7,10 @@
 			"path": "projects/digital.valesc.tinfo"
 		}
 	],
-	"settings": {}
+	"settings": {
+		"cSpell.words": [
+			"KIBIBYTE",
+			"nrom"
+		]
+	}
 }
