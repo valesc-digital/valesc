@@ -2,6 +2,7 @@
 
 use thiserror::Error;
 use rand::prelude::*;
+use log::{debug, trace};
 
 use crate::{cartridge::{Cartridge, CartridgeError}, BYTES_ON_A_KIBIBYTE};
 
@@ -77,7 +78,7 @@ impl Bus {
 
     /// Request a read to the bus. 
     pub(crate) fn read(&self, address: u16) -> Result<u8, BusError> {
-        match address {
+        let value = match address {
             CPU_RAM_WITH_MIRRORING_START_ADDRESS..=CPU_RAM_WITH_MIRRORING_END_ADDRESS => {
                 // Remove everything past the first 11 bits, mirroring the memory in the process
                 let masked_adress = address & 0b00000111_11111111;
@@ -99,12 +100,19 @@ impl Bus {
             }
 
             CARTRIDGE_CONTROLLED_REGION_START_ADDRESS..=CARTRIDGE_CONTROLLED_REGION_END_ADDRESS => unsafe { self.cartridge.read(address).map_err(BusError::CartridgeError) },
-        }
+        };
+
+        match value {
+            Ok(value) => trace!("Bus: Read {value:#02X} @ {address:#02X}"),
+            Err(ref err) => trace!("Bus: Read @ {address:#02X} failed! ({err})")
+        };
+
+        value
     }
 
     /// Write a byte to a memory address in the bus.
     pub(crate) fn write(&mut self, address: u16, value: u8) -> Result<(), BusError> {
-        println!("Wrote @ {address:#02X}: {value:#02X}");
+        trace!("Bus: Write {value:#02X} @ {address:#02X}");
         
         match address {
             CPU_RAM_WITH_MIRRORING_START_ADDRESS..=CPU_RAM_WITH_MIRRORING_END_ADDRESS => {

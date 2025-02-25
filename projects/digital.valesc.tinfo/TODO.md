@@ -1,12 +1,9 @@
 # TODO
-- Add proper testing.
-    - Start with NROM, then Bus.
-- Add docstring to everything.
-- Fix privacy rules.
 - Fix CPU.
     - Add tracing.
         - Remaining CPU cycles.
     - Proper logging.
+- Fix privacy rules.
 - Implement more opcodes.
 - Proper logging.
 - Full parse iNES and test it.

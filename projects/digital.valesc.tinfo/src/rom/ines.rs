@@ -1,5 +1,6 @@
 use std::io::{Read, Seek};
 use std::io;
+use log::debug;
 use thiserror::Error;
 
 use crate::cartridge::nrom::Nrom;
@@ -25,7 +26,7 @@ pub enum InesFileError {
 impl InesFile {
     pub fn from_read<R: Read + Seek>(reader: &mut R) -> Result<Box<dyn Cartridge>, InesFileError>
     {
-        println!("Parsing iNES ROM");
+        debug!("Parsing iNES ROM");
 
         let mut magic_bytes = [0; 4];
         reader.read_exact(&mut magic_bytes)?;
@@ -35,13 +36,13 @@ impl InesFile {
             return Err(InesFileError::MagicBytesMissing);
         }
 
-        println!("iNES magic characters are present");
+        debug!("iNES magic characters are present");
 
         let mut prg_rom_size: [u8; 1] = [0; 1];
         reader.read_exact(&mut prg_rom_size)?;
 
         let prg_rom_size =  prg_rom_size[0] as usize * 16 * BYTES_ON_KIBIBYTE;
-        println!("PRG ROM SIZE:{prg_rom_size}");
+        debug!("PRG ROM SIZE:{prg_rom_size}");
 
         let mut prg_rom = vec![0u8; prg_rom_size];
         

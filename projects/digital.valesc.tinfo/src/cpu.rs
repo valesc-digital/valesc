@@ -1,7 +1,5 @@
 //! Holds the implementation of the modified 6502 CPU used by the NES.
 
-use std::{fs::File, ptr::addr_of, sync::Arc};
-use text_io::read;
 use bitflags::bitflags;
 
 use crate::{bus::Bus, cartridge::{self, Cartridge}};
