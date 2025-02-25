@@ -1,11 +1,11 @@
+//! Holds the implementation of the modified 6502 CPU used by the NES.
+
 use std::{fs::File, ptr::addr_of, sync::Arc};
-use crate::ines::{InesFile, BYTES_ON_KIBIBYTE};
 use text_io::read;
 use bitflags::bitflags;
 
-use crate::bus::Bus;
+use crate::{bus::Bus, cartridge::{self, Cartridge}};
 
-/*
 const CPU_RAM_START_ADDRESS: u16 = 0x0000;
 const CPU_RAM_END_ADDRESS_AFTER_MIRRORS: u16 = 0x1FFF;
 
@@ -36,7 +36,7 @@ pub struct Cpu {
 }
 
 impl Cpu {
-    pub fn new(rom: InesFile) -> Self {
+    pub fn new(cartridge: Box<dyn Cartridge>) -> Self {
         Self {
             register_a: 0,
             register_x: 0,
@@ -47,14 +47,14 @@ impl Cpu {
             //program_counter: 0x8000,
             program_counter: 0xC000,
 
-            bus: Bus::new(rom),
+            bus: Bus::new(cartridge),
         }
     }
 
-    pub(crate) fn step(&mut self) {
-        let opcode = self.bus.read(self.program_counter);
-        let arg_1 = self.bus.read(self.program_counter + 1);
-        let arg_2 = self.bus.read(self.program_counter + 2);
+    pub fn step(&mut self) {
+        let opcode = self.bus.read(self.program_counter).unwrap();
+        let arg_1 = self.bus.read(self.program_counter + 1).unwrap();
+        let arg_2 = self.bus.read(self.program_counter + 2).unwrap();
 
         println!("{:X}  {opcode:02X} {arg_1:02X} {arg_2:02X}    A:{:02X} X:{:02X} Y:{:02X} P:{:02} SP:{:02X}", self.program_counter, self.register_a, self.register_x, self.register_y, self.status.bits(), self.stack_pointer);
 
@@ -167,4 +167,3 @@ impl Cpu {
         self.program_counter += arg_1 as u16;
     }
 }
-*/

@@ -1,42 +1,68 @@
+//! Holds the implementation of a memory bus for the NES.
+
 use thiserror::Error;
 use rand::prelude::*;
 
 use crate::{cartridge::{Cartridge, CartridgeError}, BYTES_ON_A_KIBIBYTE};
 
+/// The address of the first byte of the CPU RAM.
 const CPU_RAM_WITH_MIRRORING_START_ADDRESS: u16 = 0x0000;
+
+/// The address of the last byte of the CPU RAM after its three mirrors.
 const CPU_RAM_WITH_MIRRORING_END_ADDRESS: u16 = 0x1FFF;
 
+/// The address of the first byte of the PPU registers.
 const PPU_REGISTERS_WITH_MIRRORING_START_ADDRESS: u16 = 0x2000;
+
+/// The address of the last byte of the PPU registers after all the mirrors.
 const PPU_REGISTERS_WITH_MIRRORING_END_ADDRESS: u16 = 0x3FFF;
 
+/// The address of the first byte of the APU and IO registers.
 const APU_AND_IO_REGISTERS_START_ADDRESS: u16 = 0x4000;
+
+/// The address of the last byte of the APU and IO registers.
 const APU_AND_IO_REGISTERS_END_ADDRESS: u16 = 0x4017;
 
+/// The address of the first byte of the APU and IO registers available only on the CPU Test Mode.
 const APU_AND_IO_CPU_TEST_MODE_REGISTERS_START_ADDRESS: u16 = 0x4018;
+
+/// The address of the last byte of the APU and IO registers available only on the CPU Test Mode.
 const APU_AND_IO_CPU_TEST_MODE_REGISTERS_END_ADDRESS: u16 = 0x401F;
 
+/// The address of the first byte of the cartridge mapper chip controlled address range.
 const CARTRIDGE_CONTROLLED_REGION_START_ADDRESS: u16 = 0x4020;
+
+/// The address of the last byte of the cartridge mapper chip controlled address range.
 const CARTRIDGE_CONTROLLED_REGION_END_ADDRESS: u16 = 0xFFFF;
 
+/// Emulation of the chips and boards related to memory address management. 
 pub(crate) struct Bus {
+    /// The RAM of the CPU.
     cpu_ram: [u8; 2 * BYTES_ON_A_KIBIBYTE],
+
+    /// The inserted cartridge in the board.
     pub cartridge: Box<dyn Cartridge>,
 }
 
 #[derive(Error, Debug)]
-enum BusError {
+/// Errors that may happens when interacting with the bus.
+pub(crate) enum BusError {
     #[error("Unable to read from the shared memory address space: {0}")]
+    /// Unable to read from the shared memory address space.
     CannotRead(&'static str),
 
     #[error("Unable to write to the shared memory address space: {0}")]
+    /// Unable to write to the shared memory address space.
     CannotWrite(&'static str),
 
     #[error("Unable to access to the cartridge: {0}")]
+    /// Unable to access to the cartridge.
     CartridgeError(#[from] CartridgeError),
 }
 
 impl Bus {
-    pub(crate) fn new<T: Cartridge + 'static>(cartridge: T) -> Bus {
+    /// Create a new [Bus].
+    pub(crate) fn new(cartridge: Box<dyn Cartridge>) -> Bus {
         // The CPU RAM should be randomized to emulate the undefined state of the bits on startup,
         // used on some games as a pseudo RNG
 
@@ -45,10 +71,11 @@ impl Bus {
 
         Bus {
             cpu_ram: cpu_ram.try_into().unwrap(),
-            cartridge: Box::new(cartridge),
+            cartridge,
         }
     }
 
+    /// Request a read to the bus. 
     pub(crate) fn read(&self, address: u16) -> Result<u8, BusError> {
         match address {
             CPU_RAM_WITH_MIRRORING_START_ADDRESS..=CPU_RAM_WITH_MIRRORING_END_ADDRESS => {
@@ -71,12 +98,13 @@ impl Bus {
                 todo!("APU and IO special registers when the CPU is in Test Mode have not been implemented yet")
             }
 
-            CARTRIDGE_CONTROLLED_REGION_START_ADDRESS..=CARTRIDGE_CONTROLLED_REGION_END_ADDRESS => self.cartridge.read(address).map_err(BusError::CartridgeError),
+            CARTRIDGE_CONTROLLED_REGION_START_ADDRESS..=CARTRIDGE_CONTROLLED_REGION_END_ADDRESS => unsafe { self.cartridge.read(address).map_err(BusError::CartridgeError) },
         }
     }
 
+    /// Write a byte to a memory address in the bus.
     pub(crate) fn write(&mut self, address: u16, value: u8) -> Result<(), BusError> {
-        //println!("Wrote @ {address:#02X}: {value:#02X}");
+        println!("Wrote @ {address:#02X}: {value:#02X}");
         
         match address {
             CPU_RAM_WITH_MIRRORING_START_ADDRESS..=CPU_RAM_WITH_MIRRORING_END_ADDRESS => {
@@ -101,119 +129,7 @@ impl Bus {
                 todo!("APU and IO special registers when the CPU is in Test Mode have not been implemented yet")
             }
 
-            CARTRIDGE_CONTROLLED_REGION_START_ADDRESS..=CARTRIDGE_CONTROLLED_REGION_END_ADDRESS => self.cartridge.write(address, value).map_err(BusError::CartridgeError),
+            CARTRIDGE_CONTROLLED_REGION_START_ADDRESS..=CARTRIDGE_CONTROLLED_REGION_END_ADDRESS => unsafe { self.cartridge.write(address, value).map_err(BusError::CartridgeError) },
         }
     }
-
-    /*
-    fn read_mapper_controlled_region(&self, address: u16) -> Result<u8, BusError> {
-        match self.rom.mapper() {
-            Mapper::Nrom { has_32_kibibytes_prg_rom_capacity } => {
-                if address < 0x8000 {
-                    return Err(BusError::CannotRead("On a NROM memory mapper read operations below 0x800 are undefined behavior"))
-                }
-
-                let address = address as usize - 0x8000;
-
-                if has_32_kibibytes_prg_rom_capacity {
-                    return Ok(self.rom.read_prg(address));
-                }
-
-                Ok(self.rom.read_prg(address % (16 * BYTES_ON_A_KIBIBYTE)))
-            }
-        }
-    }
-
-    fn write_mapper_controlled_region(&mut self, _address: u16, _value: u8) -> Result<(), BusError> {
-        match self.rom.mapper() {
-            Mapper::Nrom { has_32_kibibytes_prg_rom_capacity: _ } => {
-                Err(BusError::CannotWrite("Write operations cannot be done with a NROM memory mapper"))
-            }
-        }
-    }
-    */
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const CPU_RAM_WITH_MIRRORING_START_ADDRESS: u16 = 0x0000;
-    const CPU_RAM_SIZE: usize = 2 * BYTES_ON_A_KIBIBYTE;
-
-    const MAPPER_CONTROLLED_REGION_START_ADDRESS: u16 = 0x4020;
-
-    // Test to do:
-    // - CPU RAM read/write
-    // - CPU RAM MIRRORS read/write (all of them)
-    // - Mappers read/write:
-    //      - NROM
-    // Probably more...
-
-    // - Check if write in RAM is preserved
-    // - Check if read mirrors of RAM are working
-    // - Check if NROM memory is plain accessed on 32K mode.
-    // - Check if NROM memory is mirrored on 16K mode.
-    // - Check if NROM memory is write protected (on 16K and 32K modes).
-    // - Check if IO access is redirected to the proper mapper. 
-
-    // TODO:
-    // - Split Mapper/Bus implementation.
-    // - Add no random mode of the bus.
-
-    /*
-    #[test]
-    fn test_nrom_mapper_fail_on_illegal_memory_address() {
-        let rom = MockNromRom::new(false);
-        let bus = Bus::new(rom);
-
-        let read_value = bus.read(MAPPER_CONTROLLED_REGION_START_ADDRESS);
-
-        assert!(read_value.is_err());
-    }
-    */
-
-    /*
-    #[test]
-    fn test_check_ram_io() {
-        let mut rom = MockRom::new();
-
-        rom.expect_mapper()
-            .return_const(Mapper::Nrom { has_32_kibibytes_prg_rom_capacity: false });
-
-        rom.expect_read_prg()
-            .withf(|index| *index == 123123)
-            .return_const(0);
-
-        let bus = Bus::new(rom);
-
-        // FIRST WRITE A WELL KNOWN VALUE (DISABLE RANDOM RAM?) AND THEN CHECK THREE TIMES
-
-        bus.read(CPU_RAM_WITH_MIRRORING_START_ADDRESS).unwrap();
-        bus.read(CPU_RAM_WITH_MIRRORING_START_ADDRESS + CPU_RAM_SIZE as u16).unwrap();
-        bus.read(CPU_RAM_WITH_MIRRORING_START_ADDRESS + CPU_RAM_SIZE as u16 * 2).unwrap();
-        bus.read(CPU_RAM_WITH_MIRRORING_START_ADDRESS + CPU_RAM_SIZE as u16 * 3).unwrap();
-    }
-
-    #[test]
-    fn test_check_rom_nrom_mapper_16k_prg_read() {
-        let mut rom = MockNromRom::new(false);
-
-        bus.read().unwrap();
-    }
-
-    #[test]
-    fn test_check_rom_nrom_mapper_32k_prg_read() {
-
-    }
-
-    #[test]
-    fn test_check_rom_nrom_mapper_16k_prg_write() {
-    }
-
-    #[test]
-    fn test_check_rom_nrom_mapper_32k_prg_write() {
-    }
-        */
-
 }
