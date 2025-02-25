@@ -1,9 +1,5 @@
 # TODO
 - Fix CPU.
-    - Add tracing.
-        - Remaining CPU cycles.
-    - Proper logging.
-- Fix privacy rules.
 - Implement more opcodes.
-- Proper logging.
 - Full parse iNES and test it.
+- Make a real initialization step on the CPU (https://www.reddit.com/r/EmuDev/comments/g663hk/nestestlog_stack_pointer_starting_at_fd_and_sbc/).

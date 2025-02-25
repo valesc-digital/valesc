@@ -1,5 +1,5 @@
 //! Experimental runner for the library.
-//! 
+//!
 //! # TODO
 //! This file/crate should be removed when a working GUI implementation of the emulator is available.
 
@@ -9,24 +9,28 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+use std::fs::File;
+use std::io::Write;
+use std::time::Instant;
+
 use env_logger::fmt::style::{AnsiColor, Style};
 use env_logger::Env;
-use log::{debug, error, info, trace, warn};
-use tinfo::rom::ines::InesFile;
+use log::error;
 use tinfo::cpu::Cpu;
-use std::io::Write;
-use std::fs::File;
+use tinfo::rom::ines::InesFile;
 
 fn main() {
     // Set the minimum log level to `warn`
-    // CHECK: https://github.com/rust-cli/env_logger/issues/162
+    // TRACK: https://github.com/rust-cli/env_logger/issues/162
     env_logger::Builder::from_env(Env::default().default_filter_or("warn"))
         .format(|buf, record| {
             let bold_red_style = Style::new().bold().fg_color(Some(AnsiColor::Red.into()));
             let bold_cyan_style = Style::new().bold().fg_color(Some(AnsiColor::Cyan.into()));
             let bold_green_style = Style::new().bold().fg_color(Some(AnsiColor::Green.into()));
             let bold_yellow_style = Style::new().bold().fg_color(Some(AnsiColor::Yellow.into()));
-            let bold_magenta_style = Style::new().bold().fg_color(Some(AnsiColor::Magenta.into()));
+            let bold_magenta_style = Style::new()
+                .bold()
+                .fg_color(Some(AnsiColor::Magenta.into()));
 
             let header = match record.level() {
                 log::Level::Trace => format!("[ {bold_magenta_style}TRACE{bold_magenta_style:#} ]"),
@@ -36,20 +40,31 @@ fn main() {
                 log::Level::Error => format!("[ {bold_red_style}ERROR{bold_red_style:#} ]"),
             };
 
-            writeln!(
-                buf,
-                "{header} {}",
-                record.args()
-            )
+            writeln!(buf, "{header} {}", record.args())
         })
         .init();
 
     let mut rom_file = File::open("nestest.nes").unwrap();
     let cartridge = InesFile::from_read(&mut rom_file).unwrap();
 
-    let mut cpu = Cpu::new(cartridge);
+    let mut cpu = Cpu::new_with_program_counter(cartridge, 0xC000);
+
+    let mut last_cycle = Instant::now();
 
     loop {
-        cpu.step();
+        if Instant::now().duration_since(last_cycle).as_nanos() < 558 {
+            continue;
+        }
+
+        last_cycle = Instant::now();
+
+        match cpu.step() {
+            Ok(value) => {
+                if let Some(value) = value {
+                    println!("{}", value.nestopia_log)
+                }
+            }
+            Err(err) => error!("{err}"),
+        }
     }
 }

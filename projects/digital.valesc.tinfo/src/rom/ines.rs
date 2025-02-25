@@ -1,5 +1,6 @@
-use std::io::{Read, Seek};
 use std::io;
+use std::io::{Read, Seek};
+
 use log::debug;
 use thiserror::Error;
 
@@ -24,8 +25,7 @@ pub enum InesFileError {
 }
 
 impl InesFile {
-    pub fn from_read<R: Read + Seek>(reader: &mut R) -> Result<Box<dyn Cartridge>, InesFileError>
-    {
+    pub fn from_read<R: Read + Seek>(reader: &mut R) -> Result<Box<dyn Cartridge>, InesFileError> {
         debug!("Parsing iNES ROM");
 
         let mut magic_bytes = [0; 4];
@@ -41,11 +41,11 @@ impl InesFile {
         let mut prg_rom_size: [u8; 1] = [0; 1];
         reader.read_exact(&mut prg_rom_size)?;
 
-        let prg_rom_size =  prg_rom_size[0] as usize * 16 * BYTES_ON_KIBIBYTE;
+        let prg_rom_size = prg_rom_size[0] as usize * 16 * BYTES_ON_KIBIBYTE;
         debug!("PRG ROM SIZE:{prg_rom_size}");
 
         let mut prg_rom = vec![0u8; prg_rom_size];
-        
+
         reader.seek(io::SeekFrom::Start(16))?;
         reader.read_exact(&mut prg_rom)?;
 
@@ -60,6 +60,6 @@ impl InesFile {
 
 impl Rom for InesFile {
     fn read_prg_data(&self, index: usize) -> u8 {
-        return self.prg_rom[index]
+        return self.prg_rom[index];
     }
 }

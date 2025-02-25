@@ -1,8 +1,8 @@
-//! Headless NES 
+//! Headless NES
 
 pub(crate) mod bus;
-pub mod cpu;
 pub mod cartridge;
+pub mod cpu;
 pub mod rom;
 
 /// The number of bytes in a kibibyte (1 KiB).
