@@ -1,11 +1,16 @@
 //! Holds the implementation of the modified 6502 CPU used by the NES.
 
+mod carry_flag;
+mod jump;
+mod load_x_register;
+mod store_x_register;
+mod subroutine;
+mod branching;
+
 use std::cmp::Ordering;
-use std::fmt::format;
-use std::ops::Add;
 
 use bitflags::bitflags;
-use log::trace;
+use log::{error, trace};
 use thiserror::Error;
 
 use crate::bus::{Bus, BusError};
@@ -43,6 +48,8 @@ bitflags! {
     }
 }
 
+const STACK_ADDRESS: u16 = 0x0100;
+
 /// The 6502 based CPU used by the NES.
 pub struct Cpu {
     /// Accumulator register, also know as register `A`, used by some ALU operations.
@@ -73,24 +80,12 @@ pub struct Cpu {
     idle_cycles: u8,
 }
 
-/// The default program counter (PC) of the CPU.
-const DEFAULT_PROGRAM_COUNTER: u16 = 0x8000;
-
 #[derive(Error, Debug)]
 /// Errors that may happen when interacting with the CPU.
 pub enum CpuError {
     #[error("Accessing the bus failed: {0}")]
     /// Accessing the bus failed
     BusError(#[from] BusError),
-
-    #[error("The selected addressing mode is not valid for the executed instruction")]
-    InvalidAddressingMode,
-}
-
-enum AddressingMode {
-    Absolute,
-    Immediate,
-    Indirect
 }
 
 /// Data returned after processing an instruction.
@@ -103,6 +98,17 @@ pub struct InstructionData {
 
     /// The value the program counter should be increased.
     pub increase_program_counter: u16,
+}
+
+impl InstructionData {
+    /// An instruction that does nothing.
+    fn stub_instruction() -> InstructionData {
+        InstructionData {
+            idle_cycles: 1,
+            assembly: String::from("NOP"),
+            increase_program_counter: 1,
+        }
+    }
 }
 
 /// Data returned after processing a CPU step.
@@ -166,12 +172,34 @@ impl Cpu {
 
         let old_program_counter = self.program_counter;
 
-        let instruction_data: InstructionData = match opcode {
-            0x4C => self.jmp(arg_1, arg_2, AddressingMode::Absolute),
-            0x6C => self.jmp(arg_1, arg_2, AddressingMode::Indirect),
-            0xA2 => self.ldx(arg_1, AddressingMode::Immediate),
-            0x8E => self.stx(arg_1, arg_2, AddressingMode::Absolute),
-            _ => unimplemented!(),
+        let log_column_two = format!(
+            "A:{:02X} X:{:02X} Y:{:02X} P:{:02} SP:{:02X}",
+            self.accumulator,
+            self.register_x,
+            self.register_y,
+            self.status.bits(),
+            self.stack_pointer
+        );
+
+        let instruction_data = match opcode {
+            0x4C => self.jump_absolute(arg_1, arg_2),
+            0x6C => self.jump_indirect(arg_1, arg_2),
+
+            0xA2 => self.load_x_register_immediate(arg_1),
+            0x8E => self.store_x_register_absolute(arg_1, arg_2),
+            0x86 => self.store_x_register_zero_page(arg_1),
+
+            0x20 => self.jump_to_subroutine(arg_1, arg_2),
+
+            0x38 => self.set_carry_flag(),
+            0x18 => self.clear_carry_flag(),
+
+            0xEA => Ok(InstructionData::stub_instruction()),
+
+            opcode => {
+                error!("UNKNOWN INSTRUCTION: 0x{opcode:02X}");
+                unimplemented!()
+            }
         }?;
 
         self.idle_cycles = instruction_data.idle_cycles;
@@ -183,120 +211,47 @@ impl Cpu {
             instruction_data.assembly
         );
         let log_padding = " ".repeat(32 - instruction_data.assembly.len());
-        let log_column_two = format!(
-            "A:{:02X} X:{:02X} Y:{:02X} P:{:02} SP:{:02X}",
-            self.accumulator,
-            self.register_x,
-            self.register_y,
-            self.status.bits(),
-            self.stack_pointer
-        );
 
         Ok(Some(StepData {
-            nestopia_log: format!(
-                "{log_column_one}{log_padding}{log_column_two}"
-            ),
+            nestopia_log: format!("{log_column_one}{log_padding}{log_column_two}"),
             instruction_data,
         }))
     }
 
-    /// Set the program counter to the desired value.
-    fn jmp(
-        &mut self,
-        arg_1: u8,
-        arg_2: u8,
-        addressing_mode: AddressingMode,
-    ) -> Result<InstructionData, CpuError> {
-        let increase_program_counter = 0;
-
-        match addressing_mode {
-            AddressingMode::Absolute => {
-                self.program_counter = (arg_1 as u16) | ((arg_2 as u16) << 8);
-
-                Ok(InstructionData {
-                    idle_cycles: 2,
-                    assembly: format!("JMP ${:04X}", self.program_counter),
-                    increase_program_counter,
-                })
-            },
-
-            AddressingMode::Indirect => {
-                let first_byte_address = (arg_1 as u16) | ((arg_2 as u16) << 8);
-                let least_significant_jump_address_byte = self.bus.read(first_byte_address)?;
-                let most_significant_jump_address_byte= self.bus.read(first_byte_address + 1)?;
-
-                self.program_counter = (least_significant_jump_address_byte as u16) | ((most_significant_jump_address_byte as u16) << 8);
-
-                Ok(InstructionData {
-                    idle_cycles: 4,
-                    assembly: format!("JMP (${first_byte_address:04X}) = {:04X}", self.program_counter),
-                    increase_program_counter,
-                })
-            }
-
-            _ => Err(CpuError::InvalidAddressingMode),
-        }
-    }
-
-    /// Load a value to the register X.
-    fn ldx(
-        &mut self,
-        arg_1: u8,
-        addressing_mode: AddressingMode,
-    ) -> Result<InstructionData, CpuError> {
-        match (arg_1 as i8).cmp(&0) {
+    /// Given a value set the cpu flags related to the positive, negative or zero value
+    /// of the given number.
+    fn set_signedness(&mut self, value: u8) {
+        match (value as i8).cmp(&0) {
             Ordering::Greater => {
                 self.status -= CpuStatusFlags::Negative;
                 self.status -= CpuStatusFlags::Zero;
-            },
+            }
 
             Ordering::Equal => {
                 self.status |= CpuStatusFlags::Zero;
                 self.status -= CpuStatusFlags::Negative;
-            },
+            }
 
             Ordering::Less => {
                 self.status |= CpuStatusFlags::Negative;
                 self.status -= CpuStatusFlags::Zero;
-            },
-        }
-
-        match addressing_mode {
-            AddressingMode::Immediate => {
-                self.register_x = arg_1;
-
-                Ok(InstructionData {
-                    idle_cycles: 1,
-                    assembly: format!("LDX #${arg_1:02X}"),
-                    increase_program_counter: 2,
-                })
             }
-
-            _ => Err(CpuError::InvalidAddressingMode),
         }
     }
 
-    /// Store a value from the register X.
-    fn stx(
-        &mut self,
-        arg_1: u8,
-        arg_2: u8,
-        addressing_mode: AddressingMode,
-    ) -> Result<InstructionData, CpuError> {
-        match addressing_mode {
-            AddressingMode::Absolute => {
-                let address = arg_1 as u16 | ((arg_2 as u16) << 8);
-                self.bus.write(address, self.register_x)?;
+    /// Push a value to the stack.
+    fn stack_push(&mut self, value: u8) -> Result<(), BusError> {
+        self.bus.write(STACK_ADDRESS + self.stack_pointer as u16, value)?;
+        self.stack_pointer -= 1;
 
-                Ok(InstructionData {
-                    idle_cycles: 3,
-                    assembly: format!("STX ${address:04X} = {:00X}", self.register_x),
-                    increase_program_counter: 3,
-                })
-            }
+        Ok(())
+    }
 
-            _ => Err(CpuError::InvalidAddressingMode),
-        }
+    /// Pull a value from the stack.
+    fn stack_pull(&mut self) -> Result<u8, BusError> {
+        self.stack_pointer += 1;
+
+        self.bus.read(STACK_ADDRESS + self.stack_pointer as u16)
     }
 }
 
@@ -304,17 +259,16 @@ impl Cpu {
 mod tests {
     use super::*;
 
+    pub(crate) const NOP: u8 = 0xEA;
     const DEFAULT_PROGRAM_COUNTER: usize = 0x8000;
 
-    struct MockCartridge {
-      prg_data: Vec<u8>,
+    pub(crate) struct MockCartridge {
+        prg_data: Vec<u8>,
     }
 
     impl MockCartridge {
-        fn new(prg_data: Vec<u8>) -> MockCartridge {
-            MockCartridge {
-                prg_data
-            }
+        pub(crate) fn new(prg_data: Vec<u8>) -> MockCartridge {
+            MockCartridge { prg_data }
         }
     }
 
@@ -323,162 +277,45 @@ mod tests {
             Ok(self.prg_data[address as usize - DEFAULT_PROGRAM_COUNTER])
         }
 
-        unsafe fn write(&mut self, _address: u16, _value: u8) -> Result<(), crate::cartridge::CartridgeError> {
+        unsafe fn write(
+            &mut self,
+            _address: u16,
+            _value: u8,
+        ) -> Result<(), crate::cartridge::CartridgeError> {
             Ok(())
         }
     }
 
-    #[test]
-    fn test_jmp_absolute() {
-        let cartridge = MockCartridge::new(vec![
-            // JMP $5533
-            0x4C,
-            0x33,
-            0x55,
-        ]);
+    impl Cpu {
+        pub(crate) fn quick_step(&mut self) -> InstructionData {
+            let instruction_data = self.step().unwrap().unwrap().instruction_data;
 
-        let mut cpu = Cpu::new(Box::new(cartridge));
-        
-        let instruction_data = cpu.step().unwrap().unwrap().instruction_data;
+            for _ in 0..instruction_data.idle_cycles {
+                self.step().unwrap();
+            }
 
-        assert_eq!(instruction_data.assembly, "JMP $5533");
-        assert_eq!(instruction_data.idle_cycles, 2);
-        assert_eq!(cpu.program_counter, 0x5533);
+            instruction_data
+        }
+
+        pub(crate) fn batch_step(&mut self, num_of_steps: usize) {
+            for _ in 0..num_of_steps {
+                self.quick_step();
+            }
+        }
     }
 
     #[test]
-    fn test_jmp_indirect() {
+    fn test_nop() {
         let cartridge = MockCartridge::new(vec![
-            // LDX #$5C
-            0xA2,
-            0x5C,
-
-            // STX
-            0x8E,
-            0x00,
-            0x00,
-
-            // LDX #$FF
-            0xA2,
-            0xFF,
-
-            // STX
-            0x8E,
-            0x01,
-            0x00,
-
-            // JMP ($0000) = 5CFF
-            0x6C,
-            0x00,
-            0x00,
-        ]);
-
-        let mut cpu = Cpu::new(Box::new(cartridge));
-        
-        cpu.step().unwrap();
-        cpu.step().unwrap();
-        cpu.step().unwrap();
-        cpu.step().unwrap();
-        cpu.step().unwrap();
-        cpu.step().unwrap();
-        cpu.step().unwrap();
-        cpu.step().unwrap();
-        cpu.step().unwrap();
-        cpu.step().unwrap();
-        cpu.step().unwrap();
-        cpu.step().unwrap();
-
-        let instruction_data = cpu.step().unwrap().unwrap().instruction_data;
-
-        assert_eq!(instruction_data.assembly, "JMP ($0000) = FF5C");
-        assert_eq!(instruction_data.idle_cycles, 4);
-        assert_eq!(cpu.program_counter, 0xFF5C);
-    }
-
-    #[test]
-    fn test_ldx_immediate() {
-        let cartridge = MockCartridge::new(vec![
-            // LDX #$5C
-            0xA2,
-            0x5C,
-
-            // LDX #$81
-            // Negative number -1
-            0xA2,
-            0x81,
-
-            // LDX #$00
-            0xA2,
-            0x00,
-
-            // NOP used for alignment proposes
-            0xEA,
+            // CLC
+            NOP, NOP, NOP,
         ]);
 
         let mut cpu = Cpu::new(Box::new(cartridge));
 
-        // Put the CPU to an impossible state only to check if
-        // the flags are always corrected
-        cpu.status |= CpuStatusFlags::Negative | CpuStatusFlags::Zero;
-        
-        // Positive value
-        let instruction_data = cpu.step().unwrap().unwrap().instruction_data;
+        let instruction_data = cpu.quick_step();
 
-        assert_eq!(instruction_data.assembly, "LDX #$5C");
+        assert_eq!(instruction_data.assembly, "NOP");
         assert_eq!(instruction_data.idle_cycles, 1);
-        assert_eq!(cpu.register_x, 0x5C);
-
-        assert!(!cpu.status.contains(CpuStatusFlags::Negative));
-        assert!(!cpu.status.contains(CpuStatusFlags::Zero));
-
-        cpu.step().unwrap();
-
-        // Negative value
-        let instruction_data = cpu.step().unwrap().unwrap().instruction_data;
-
-        assert_eq!(instruction_data.assembly, "LDX #$81");
-        assert_eq!(instruction_data.idle_cycles, 1);
-        assert_eq!(cpu.register_x, 0x81);
-
-        assert!(cpu.status.contains(CpuStatusFlags::Negative));
-        assert!(!cpu.status.contains(CpuStatusFlags::Zero));
-
-        cpu.step().unwrap();
-
-        // Zero value
-        let instruction_data = cpu.step().unwrap().unwrap().instruction_data;
-
-        assert_eq!(instruction_data.assembly, "LDX #$00");
-        assert_eq!(instruction_data.idle_cycles, 1);
-        assert_eq!(cpu.register_x, 0x00);
-
-        assert!(!cpu.status.contains(CpuStatusFlags::Negative));
-        assert!(cpu.status.contains(CpuStatusFlags::Zero));
-    }
-
-    #[test]
-    fn test_stx_absolute() {
-        let cartridge = MockCartridge::new(vec![
-            // LDX #$CC
-            0xA2,
-            0xCC,
-
-            // STX
-            0x8E,
-            0x00,
-            0x00,
-        ]);
-
-        let mut cpu = Cpu::new(Box::new(cartridge));
-        
-        // Skip first instruction and its idle cycles
-        cpu.step().unwrap();
-        cpu.step().unwrap();
-
-        let instruction_data = cpu.step().unwrap().unwrap().instruction_data;
-
-        assert_eq!(instruction_data.assembly, "STX $0000 = CC");
-        assert_eq!(instruction_data.idle_cycles, 3);
-        assert_eq!(cpu.bus.read(0x0000).unwrap(), 0xCC);
     }
 }

@@ -1,11 +1,8 @@
 # TODO
-- Fix CPU.
-    - FOLLOW THIS!!! https://www.reddit.com/r/EmuDev/comments/gwl742/how_do_you_unit_test_cpu_code_with_tdd/
-        - OR MAYBE NOT? SHORTER TESTS ARE A PRIORITY.
-        - Integration tests with nestest.nes is a must have.
-    - Fix `.step().unwrap()` hell.
-    - Make writing assembly easier, maybe in a mod.rs doing the thing below in a shared tests submodule.
-    - Split opcodes implementation and tests.
+- CHECK DISCORD AND FINISH BRANCH IF CARRY
 - Implement more opcodes.
+- Test the stack. (With opcodes?), move the functions to its file.
+- Test address builder.
 - Full parse iNES and test it.
 - Make a real initialization step on the CPU (https://www.reddit.com/r/EmuDev/comments/g663hk/nestestlog_stack_pointer_starting_at_fd_and_sbc/).
+- Fix OOB and remove NOP on tests.
