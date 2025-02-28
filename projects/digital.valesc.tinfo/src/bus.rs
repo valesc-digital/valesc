@@ -1,10 +1,16 @@
 //! Holds the implementation of a memory bus for the NES.
 
+use std::cell::RefCell;
+use std::io::Read;
+use std::rc::Rc;
+use std::time::Instant;
+
 use log::trace;
 use rand::prelude::*;
 use thiserror::Error;
 
 use crate::cartridge::{Cartridge, CartridgeError};
+use crate::cpu::{self, Cpu, CpuError};
 use crate::BYTES_ON_A_KIBIBYTE;
 
 /// The address of the first byte of the CPU RAM.
@@ -38,17 +44,29 @@ const CARTRIDGE_CONTROLLED_REGION_START_ADDRESS: u16 = 0x4020;
 const CARTRIDGE_CONTROLLED_REGION_END_ADDRESS: u16 = 0xFFFF;
 
 /// Emulation of the chips and boards related to memory address management.
-pub(crate) struct Bus {
+pub struct Bus {
+    /// The CPU of the NES.
+    cpu: Cpu,
+
     /// The RAM of the CPU.
     cpu_ram: [u8; 2 * BYTES_ON_A_KIBIBYTE],
 
+    last_cpu_cycle: Instant,
+
     /// The inserted cartridge in the board.
-    pub cartridge: Box<dyn Cartridge>,
+    cartridge: Box<dyn Cartridge>,
+
+    cpu_response: Option<u8>,
+}
+
+pub(crate) enum BusRequest {
+    Read {address: u16},
+    Write {address: u16, value: u8}
 }
 
 #[derive(Error, Debug)]
 /// Errors that may happens when interacting with the bus.
-pub(crate) enum BusError {
+pub enum BusError {
     #[error("Unable to read from the shared memory address space: {0}")]
     /// Unable to read from the shared memory address space.
     CannotRead(&'static str),
@@ -62,9 +80,18 @@ pub(crate) enum BusError {
     CartridgeError(#[from] CartridgeError),
 }
 
+#[derive(Error, Debug)]
+pub enum BusTickError {
+    #[error("Unable to access the bus: {0}")]
+    BusError(#[from] BusError),
+
+    #[error("Unable to tick the CPU: {0}")]
+    CpuError(#[from] CpuError)
+}
+
 impl Bus {
     /// Create a new [Bus].
-    pub(crate) fn new(cartridge: Box<dyn Cartridge>) -> Bus {
+    pub fn new(cartridge: Box<dyn Cartridge>) -> Bus {
         // The CPU RAM should be randomized to emulate the undefined state of the bits on startup,
         // used on some games as a pseudo RNG
 
@@ -74,7 +101,28 @@ impl Bus {
         Bus {
             cpu_ram: cpu_ram.try_into().unwrap(),
             cartridge,
+            last_cpu_cycle: Instant::now(),
+            cpu: Cpu::new(),
+            cpu_response: None,
         }
+    }
+
+    /// Check all the internal timers and trigger the necessary system components.
+    pub fn tick(&mut self) -> Result<(), BusTickError>{
+        if let Some(request) = self.cpu.tick(self.cpu_response)? {
+            match request {
+                BusRequest::Read {address} => {
+                    self.cpu_response = Some(self.read(address)?)
+                },
+
+                BusRequest::Write {address, value} => {
+                    self.write(address, value)?;
+                    self.cpu_response = None;
+                }
+            }
+        };
+
+        Ok(())
     }
 
     /// Request a read to the bus.

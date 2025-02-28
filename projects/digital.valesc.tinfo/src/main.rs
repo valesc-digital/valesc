@@ -15,9 +15,8 @@ use std::time::Instant;
 
 use env_logger::fmt::style::{AnsiColor, Style};
 use env_logger::Env;
-use log::error;
-use tinfo::cpu::Cpu;
 use tinfo::rom::ines::InesFile;
+use tinfo::bus::Bus;
 
 fn main() {
     // Set the minimum log level to `warn`
@@ -47,24 +46,11 @@ fn main() {
     let mut rom_file = File::open("nestest.nes").unwrap();
     let cartridge = InesFile::from_read(&mut rom_file).unwrap();
 
-    let mut cpu = Cpu::new_with_program_counter(cartridge, 0xC000);
+    let mut bus = Bus::new(cartridge);
 
     let mut last_cycle = Instant::now();
 
     loop {
-        if Instant::now().duration_since(last_cycle).as_nanos() < 558 {
-            continue;
-        }
-
-        last_cycle = Instant::now();
-
-        match cpu.step() {
-            Ok(value) => {
-                if let Some(value) = value {
-                    println!("{}", value.nestopia_log)
-                }
-            }
-            Err(err) => error!("{err}"),
-        }
+        let _ = bus.tick();
     }
 }
