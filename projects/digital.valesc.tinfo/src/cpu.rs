@@ -1,13 +1,8 @@
-//! Holds the implementation of the modified 6502 CPU used by the NES.
-
-mod carry_flag;
-mod jump;
-mod load_x_register;
-mod store_x_register;
-mod subroutine;
-mod branching;
+//! Holds the implementation of the modified 2A03 CPU used by the NES.
 
 use std::cmp::Ordering;
+use std::collections::VecDeque;
+use std::ops::Add;
 
 use bitflags::bitflags;
 use log::{error, trace};
@@ -48,9 +43,22 @@ bitflags! {
     }
 }
 
+/// The address to the first byte of the stack in the bus memory space.
 const STACK_ADDRESS: u16 = 0x0100;
 
-/// The 6502 based CPU used by the NES.
+pub enum AddressingMode {
+    Absolute,
+}
+
+pub enum Instruction {
+    Jump(AddressingMode)
+}
+
+pub struct CpuStep {
+
+}
+
+/// The 2A03 CPU used by the NES.
 pub struct Cpu {
     /// Accumulator register, also know as register `A`, used by some ALU operations.
     accumulator: u8,
@@ -73,11 +81,7 @@ pub struct Cpu {
     /// The bus and board of the NES system.
     bus: Bus,
 
-    /// The current cycle number of the CPU.
-    cycle: u64,
-
-    /// The number of cycles the CPU should skip processing instructions for timing.
-    idle_cycles: u8,
+    remaining_steps: VecDeque<CpuStep>,
 }
 
 #[derive(Error, Debug)]
@@ -86,39 +90,6 @@ pub enum CpuError {
     #[error("Accessing the bus failed: {0}")]
     /// Accessing the bus failed
     BusError(#[from] BusError),
-}
-
-/// Data returned after processing an instruction.
-pub struct InstructionData {
-    /// The number of cycles the CPU should skip for correct timing.
-    pub idle_cycles: u8,
-
-    /// Formatted string of the processed instruction as it should be written in assembly.
-    pub assembly: String,
-
-    /// The value the program counter should be increased.
-    pub increase_program_counter: u16,
-}
-
-impl InstructionData {
-    /// An instruction that does nothing.
-    fn stub_instruction() -> InstructionData {
-        InstructionData {
-            idle_cycles: 1,
-            assembly: String::from("NOP"),
-            increase_program_counter: 1,
-        }
-    }
-}
-
-/// Data returned after processing a CPU step.
-pub struct StepData {
-    /// Information log entry related to the step formatted as the [Nestopia emulator](http://0ldsk00l.ca/nestopia/),
-    /// useful for testing with `nestest.nes` and `nestest.log`.
-    pub nestopia_log: String,
-
-    /// The data related to the processed instruction.
-    pub instruction_data: InstructionData,
 }
 
 impl Cpu {
@@ -139,183 +110,17 @@ impl Cpu {
             program_counter,
 
             bus: Bus::new(cartridge),
-            cycle: 0,
-            idle_cycles: 0,
+            remaining_steps: VecDeque::new(),
         }
     }
 
-    /// Step once the CPU.
-    pub fn step(&mut self) -> Result<Option<StepData>, CpuError> {
-        self.cycle += 1;
+    /// Do a cycle on the CPU.
+    pub fn cycle() {
 
-        if self.idle_cycles > 0 {
-            self.idle_cycles -= 1;
-            trace!("Idle cycle, skipping");
-
-            return Ok(None);
-        }
-
-        let opcode = self
-            .bus
-            .read(self.program_counter)
-            .map_err(CpuError::BusError)?;
-
-        let arg_1 = self
-            .bus
-            .read(self.program_counter + 1)
-            .map_err(CpuError::BusError)?;
-
-        let arg_2 = self
-            .bus
-            .read(self.program_counter + 2)
-            .map_err(CpuError::BusError)?;
-
-        let old_program_counter = self.program_counter;
-
-        let log_column_two = format!(
-            "A:{:02X} X:{:02X} Y:{:02X} P:{:02} SP:{:02X}",
-            self.accumulator,
-            self.register_x,
-            self.register_y,
-            self.status.bits(),
-            self.stack_pointer
-        );
-
-        let instruction_data = match opcode {
-            0x4C => self.jump_absolute(arg_1, arg_2),
-            0x6C => self.jump_indirect(arg_1, arg_2),
-
-            0xA2 => self.load_x_register_immediate(arg_1),
-            0x8E => self.store_x_register_absolute(arg_1, arg_2),
-            0x86 => self.store_x_register_zero_page(arg_1),
-
-            0x20 => self.jump_to_subroutine(arg_1, arg_2),
-
-            0x38 => self.set_carry_flag(),
-            0x18 => self.clear_carry_flag(),
-
-            0xEA => Ok(InstructionData::stub_instruction()),
-
-            opcode => {
-                error!("UNKNOWN INSTRUCTION: 0x{opcode:02X}");
-                unimplemented!()
-            }
-        }?;
-
-        self.idle_cycles = instruction_data.idle_cycles;
-        self.program_counter += instruction_data.increase_program_counter;
-
-        // Nestopia logging format
-        let log_column_one = format!(
-            "{old_program_counter:X}  {opcode:02X} {arg_1:02X} {arg_2:02X}  {}",
-            instruction_data.assembly
-        );
-        let log_padding = " ".repeat(32 - instruction_data.assembly.len());
-
-        Ok(Some(StepData {
-            nestopia_log: format!("{log_column_one}{log_padding}{log_column_two}"),
-            instruction_data,
-        }))
-    }
-
-    /// Given a value set the cpu flags related to the positive, negative or zero value
-    /// of the given number.
-    fn set_signedness(&mut self, value: u8) {
-        match (value as i8).cmp(&0) {
-            Ordering::Greater => {
-                self.status -= CpuStatusFlags::Negative;
-                self.status -= CpuStatusFlags::Zero;
-            }
-
-            Ordering::Equal => {
-                self.status |= CpuStatusFlags::Zero;
-                self.status -= CpuStatusFlags::Negative;
-            }
-
-            Ordering::Less => {
-                self.status |= CpuStatusFlags::Negative;
-                self.status -= CpuStatusFlags::Zero;
-            }
-        }
-    }
-
-    /// Push a value to the stack.
-    fn stack_push(&mut self, value: u8) -> Result<(), BusError> {
-        self.bus.write(STACK_ADDRESS + self.stack_pointer as u16, value)?;
-        self.stack_pointer -= 1;
-
-        Ok(())
-    }
-
-    /// Pull a value from the stack.
-    fn stack_pull(&mut self) -> Result<u8, BusError> {
-        self.stack_pointer += 1;
-
-        self.bus.read(STACK_ADDRESS + self.stack_pointer as u16)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    pub(crate) const NOP: u8 = 0xEA;
-    const DEFAULT_PROGRAM_COUNTER: usize = 0x8000;
-
-    pub(crate) struct MockCartridge {
-        prg_data: Vec<u8>,
-    }
-
-    impl MockCartridge {
-        pub(crate) fn new(prg_data: Vec<u8>) -> MockCartridge {
-            MockCartridge { prg_data }
-        }
-    }
-
-    impl Cartridge for MockCartridge {
-        unsafe fn read(&self, address: u16) -> Result<u8, crate::cartridge::CartridgeError> {
-            Ok(self.prg_data[address as usize - DEFAULT_PROGRAM_COUNTER])
-        }
-
-        unsafe fn write(
-            &mut self,
-            _address: u16,
-            _value: u8,
-        ) -> Result<(), crate::cartridge::CartridgeError> {
-            Ok(())
-        }
-    }
-
-    impl Cpu {
-        pub(crate) fn quick_step(&mut self) -> InstructionData {
-            let instruction_data = self.step().unwrap().unwrap().instruction_data;
-
-            for _ in 0..instruction_data.idle_cycles {
-                self.step().unwrap();
-            }
-
-            instruction_data
-        }
-
-        pub(crate) fn batch_step(&mut self, num_of_steps: usize) {
-            for _ in 0..num_of_steps {
-                self.quick_step();
-            }
-        }
-    }
-
-    #[test]
-    fn test_nop() {
-        let cartridge = MockCartridge::new(vec![
-            // CLC
-            NOP, NOP, NOP,
-        ]);
-
-        let mut cpu = Cpu::new(Box::new(cartridge));
-
-        let instruction_data = cpu.quick_step();
-
-        assert_eq!(instruction_data.assembly, "NOP");
-        assert_eq!(instruction_data.idle_cycles, 1);
-    }
 }
