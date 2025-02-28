@@ -1,6 +1,12 @@
-use std::io::{Read, Seek};
 use std::io;
+use std::io::{Read, Seek};
+
+use log::debug;
 use thiserror::Error;
+
+use crate::cartridge::nrom::Nrom;
+use crate::cartridge::Cartridge;
+use crate::rom::Rom;
 
 pub const BYTES_ON_KIBIBYTE: usize = 1024;
 
@@ -19,9 +25,8 @@ pub enum InesFileError {
 }
 
 impl InesFile {
-    pub fn from_read<R: Read + Seek>(reader: &mut R) -> Result<InesFile, InesFileError>
-    {
-        println!("Parsing iNES ROM");
+    pub fn from_read<R: Read + Seek>(reader: &mut R) -> Result<Box<dyn Cartridge>, InesFileError> {
+        debug!("Parsing iNES ROM");
 
         let mut magic_bytes = [0; 4];
         reader.read_exact(&mut magic_bytes)?;
@@ -31,22 +36,30 @@ impl InesFile {
             return Err(InesFileError::MagicBytesMissing);
         }
 
-        println!("iNES magic characters are present");
+        debug!("iNES magic characters are present");
 
         let mut prg_rom_size: [u8; 1] = [0; 1];
         reader.read_exact(&mut prg_rom_size)?;
 
-        let prg_rom_size =  prg_rom_size[0] as usize * 16 * BYTES_ON_KIBIBYTE;
-        println!("PRG ROM SIZE:{prg_rom_size}");
+        let prg_rom_size = prg_rom_size[0] as usize * 16 * BYTES_ON_KIBIBYTE;
+        debug!("PRG ROM SIZE:{prg_rom_size}");
 
         let mut prg_rom = vec![0u8; prg_rom_size];
-        
+
         reader.seek(io::SeekFrom::Start(16))?;
         reader.read_exact(&mut prg_rom)?;
 
-        Ok(Self {
+        let rom = Self {
             prg_rom,
             prg_rom_size,
-        })
+        };
+
+        Ok(Box::new(Nrom::new(false, rom)))
+    }
+}
+
+impl Rom for InesFile {
+    fn read_prg_data(&self, index: usize) -> u8 {
+        return self.prg_rom[index];
     }
 }
