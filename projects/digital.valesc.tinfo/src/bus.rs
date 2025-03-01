@@ -45,9 +45,6 @@ const CARTRIDGE_CONTROLLED_REGION_END_ADDRESS: u16 = 0xFFFF;
 
 /// Emulation of the chips and boards related to memory address management.
 pub struct Bus {
-    /// The CPU of the NES.
-    cpu: Cpu,
-
     /// The RAM of the CPU.
     cpu_ram: [u8; 2 * BYTES_ON_A_KIBIBYTE],
 
@@ -57,11 +54,6 @@ pub struct Bus {
     cartridge: Box<dyn Cartridge>,
 
     cpu_response: Option<u8>,
-}
-
-pub(crate) enum BusRequest {
-    Read {address: u16},
-    Write {address: u16, value: u8}
 }
 
 #[derive(Error, Debug)]
@@ -80,15 +72,6 @@ pub enum BusError {
     CartridgeError(#[from] CartridgeError),
 }
 
-#[derive(Error, Debug)]
-pub enum BusTickError {
-    #[error("Unable to access the bus: {0}")]
-    BusError(#[from] BusError),
-
-    #[error("Unable to tick the CPU: {0}")]
-    CpuError(#[from] CpuError)
-}
-
 impl Bus {
     /// Create a new [Bus].
     pub fn new(cartridge: Box<dyn Cartridge>) -> Bus {
@@ -102,27 +85,8 @@ impl Bus {
             cpu_ram: cpu_ram.try_into().unwrap(),
             cartridge,
             last_cpu_cycle: Instant::now(),
-            cpu: Cpu::new(),
             cpu_response: None,
         }
-    }
-
-    /// Check all the internal timers and trigger the necessary system components.
-    pub fn tick(&mut self) -> Result<(), BusTickError>{
-        if let Some(request) = self.cpu.tick(self.cpu_response)? {
-            match request {
-                BusRequest::Read {address} => {
-                    self.cpu_response = Some(self.read(address)?)
-                },
-
-                BusRequest::Write {address, value} => {
-                    self.write(address, value)?;
-                    self.cpu_response = None;
-                }
-            }
-        };
-
-        Ok(())
     }
 
     /// Request a read to the bus.

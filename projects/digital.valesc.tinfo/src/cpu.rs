@@ -1,5 +1,6 @@
 //! Holds the implementation of the modified 2A03 CPU used by the NES.
 
+use core::panic;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
@@ -12,8 +13,9 @@ use bitflags::bitflags;
 use log::{error, trace};
 use thiserror::Error;
 
-use crate::bus::{self, Bus, BusError, BusRequest};
-use crate::cartridge::Cartridge;
+use crate::bus::{self, Bus, BusError};
+use crate::cartridge::{self, Cartridge};
+use crate::{build_address, rom};
 
 bitflags! {
     #[derive(Debug)]
@@ -73,7 +75,11 @@ pub struct Cpu {
     current_instruction: Instruction,
     current_instruction_cycle: u8,
 
-    last_cpu_cycle: Instant,
+    bus: Bus,
+
+    /// The 2A05 CPU can access data retrived from previous cycles of the same instruction,
+    /// cycles can store here well-known internal data.
+    cache: Vec<u8>,
 }
 
 #[derive(Error, Debug)]
@@ -83,36 +89,35 @@ pub enum CpuError {
     /// Accessing the bus failed
     BusError(#[from] BusError),
 
-    #[error("Running the instruction failed: {0}")]
+    #[error("Running the cycle failed: {0}")]
     /// Accessing the bus failed
-    InstructionError(#[from] StepError),
+    InstructionError(#[from] CycleError),
 }
 
 #[derive(Debug)]
-pub enum Instruction {
-    FetchOpcode,
+// To much of a hassle to document all of them
+#[allow(clippy::missing_docs_in_private_items)]
+/// The different instructions that the CPU can run.
+enum Instruction {
+    Stub,
     JumpAbsolute,
 }
 
-pub(crate) enum StepAction {
-    BusRequest(BusRequest),
-    EndOfInstruction,
-    ChangeInstruction(u8),
-    Nothing,
-}
-
 #[derive(Error, Debug)]
-pub enum StepError {
-    #[error("Invalid instruction")]
-    InvalidInstruction,
-
+/// Errors that can happen when running a cycle.
+pub enum CycleError {
     #[error("The requested instruction step is out of bounds")]
+    /// The requested instruction step is out of bounds
     InstructionStepOutOfBounds,
+
+    #[error("Accessing the bus failed: {0}")]
+    /// Accessing the bus failed
+    BusError(#[from] BusError),
 }
 
 impl Cpu {
     /// Create a new [Cpu].
-    pub fn new() -> Cpu {
+    pub fn new(cartridge: Box<dyn Cartridge>) -> Cpu {
         Self {
             accumulator: 0,
             register_x: 0,
@@ -122,96 +127,64 @@ impl Cpu {
             stack_pointer: 0xFD,
             program_counter: 0xC000,
 
-            last_cpu_cycle: Instant::now(),
+            current_instruction: Instruction::Stub,
+            current_instruction_cycle: 1,
 
-            current_instruction: Instruction::FetchOpcode,
-            current_instruction_cycle: 0,
+            bus: Bus::new(cartridge),
+            cache: vec![],
         }
     }
 
-    /// Tick the CPU.
-    pub fn tick(&mut self, bus_response: Option<u8>) -> Result<Option<BusRequest>, CpuError> {
-        let step_action = match self.current_instruction {
-            Instruction::FetchOpcode => self.fetch_opcode(bus_response),
-            Instruction::JumpAbsolute => self.jump_absolute(bus_response),
+    /// Run a cycle of the CPU.
+    pub fn cycle(&mut self) -> Result<(), CpuError> {
+        if self.current_instruction_cycle == 1 {
+            self.current_instruction = Self::dispatch_opcode(self.bus.read(self.program_counter)?);
+            self.program_counter += 1;
+            self.current_instruction_cycle += 1;
+
+            return Ok(());
+        }
+
+        let instruction_ended = match self.current_instruction {
+            Instruction::JumpAbsolute => self.jump_absolute(),
+            Instruction::Stub => panic!("The stub instruction should never go beyond step 1!"),
         }?;
 
-        let bus_request = match step_action {
-            StepAction::BusRequest(bus_request) => {
-                self.current_instruction_cycle += 1;
+        self.current_instruction_cycle += 1;
 
-                Some(bus_request)
-            }
- 
-            StepAction::EndOfInstruction => {
-                self.current_instruction_cycle = 0;
-                self.current_instruction = Instruction::FetchOpcode;
+        if instruction_ended {
+            // This will retrigger the opcode dispatch cycle
+            self.current_instruction_cycle = 1;
+            self.cache.clear();
+        }
 
-                None
-            },
-
-            StepAction::ChangeInstruction(opcode) => {
-                self.current_instruction = Self::dispatch_opcode(opcode);
-                self.current_instruction_cycle = 0;
-
-                None
-            }
-
-            StepAction::Nothing => {
-                self.current_instruction_cycle += 1;
-
-                None
-            },
-        };
-
-        Ok(bus_request)
-    }
-
-    fn fetch_opcode(&mut self, bus_response: Option<u8>) -> Result<StepAction, StepError> {
-            match self.current_instruction_cycle {
-                0 => {
-                    Ok(StepAction::BusRequest(BusRequest::Read { address: self.program_counter }))
-                },
-    
-                1 => {
-                    Ok(StepAction::ChangeInstruction(bus_response.unwrap()))
-                },
-    
-                _ => Err(StepError::InstructionStepOutOfBounds)
-            }
+        Ok(())
     }
 
     fn dispatch_opcode(opcode: u8) -> Instruction {
         match opcode {
             0x4C => Instruction::JumpAbsolute,
-            _ => unimplemented!()
+            _ => unimplemented!("The opcode {opcode:02X} is not implemented yet!")
         }
     }
     
-    fn jump_absolute(&mut self, bus_response: Option<u8>) -> Result<StepAction, StepError> {
+    fn jump_absolute(&mut self) -> Result<bool, CycleError> {
         match self.current_instruction_cycle {
-            0 => {
-                self.program_counter += 1;
-
-                Ok(StepAction::BusRequest(BusRequest::Read { address: self.program_counter }))
-            },
-
-            1 => {
-                self.program_counter += 1;
-                let low_address_byte = bus_response.unwrap();
-
-                Ok(StepAction::BusRequest(BusRequest::Read { address: self.program_counter }))
-            },
-
             2 => {
-                // COPY LOW TO PCL
-                let high_address_byte = bus_response.unwrap();
-                // COPY HIGH TO PCH
+                self.cache.push(self.bus.read(self.program_counter)?);
+                self.program_counter += 1;
 
-                Ok(StepAction::EndOfInstruction)
+                Ok(false)
+            },
+
+            3 => {
+                let program_counter_adress_high_byte = self.bus.read(self.program_counter)?;
+                self.program_counter = build_address(self.cache[0], program_counter_adress_high_byte);
+
+                Ok(true)
             }
 
-            _ => Err(StepError::InstructionStepOutOfBounds)
+            _ => Err(CycleError::InstructionStepOutOfBounds)
         }
     }
 }

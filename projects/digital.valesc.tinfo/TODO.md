@@ -1,4 +1,6 @@
 # TODO
+- Modules to refactor:
+    - ines.rs
 - CHECK DISCORD AND FINISH BRANCH IF CARRY
 - Implement more opcodes.
 - Test the stack. (With opcodes?), move the functions to its file.

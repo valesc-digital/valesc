@@ -15,6 +15,7 @@ use std::time::Instant;
 
 use env_logger::fmt::style::{AnsiColor, Style};
 use env_logger::Env;
+use tinfo::cpu::Cpu;
 use tinfo::rom::ines::InesFile;
 use tinfo::bus::Bus;
 
@@ -46,11 +47,11 @@ fn main() {
     let mut rom_file = File::open("nestest.nes").unwrap();
     let cartridge = InesFile::from_read(&mut rom_file).unwrap();
 
-    let mut bus = Bus::new(cartridge);
+    let mut cpu = Cpu::new(cartridge);
 
     let mut last_cycle = Instant::now();
 
     loop {
-        let _ = bus.tick();
+        let _ = cpu.cycle();
     }
 }
