@@ -13,3 +13,9 @@ C737  B0 03     BCS $C73C                       A:00 X:00 Y:00 P:26 SP:FB PPU:  
 C739  4C 40 C7  JMP $C740                       A:00 X:00 Y:00 P:26 SP:FB PPU:  0,  0 CYC:40
 C740  EA        NOP                             A:00 X:00 Y:00 P:26 SP:FB PPU:  0,  0 CYC:43
 C741  38        SEC                             A:00 X:00 Y:00 P:26 SP:FB PPU:  0,  0 CYC:45
+C742  90 03     BCC $C747                       A:00 X:00 Y:00 P:27 SP:FB PPU:  0,  0 CYC:47
+C744  4C 4B C7  JMP $C74B                       A:00 X:00 Y:00 P:27 SP:FB PPU:  0,  0 CYC:49
+C74B  EA        NOP                             A:00 X:00 Y:00 P:27 SP:FB PPU:  0,  0 CYC:52
+C74C  18        CLC                             A:00 X:00 Y:00 P:27 SP:FB PPU:  0,  0 CYC:54
+C74D  90 04     BCC $C753                       A:00 X:00 Y:00 P:26 SP:FB PPU:  0,  0 CYC:56
+C753  EA        NOP                             A:00 X:00 Y:00 P:26 SP:FB PPU:  0,  0 CYC:59

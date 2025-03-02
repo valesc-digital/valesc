@@ -39,9 +39,6 @@ mod tests {
         let cartridge = MockCartridge::new(vec![
             // NOP
             0xEA,
-            
-            // Dummy value, implied address does a dummy read
-            0xFF
         ]);
 
         let mut cpu = Cpu::new(Box::new(cartridge));

@@ -19,7 +19,7 @@ use crate::bus::{Bus, BusError};
 use crate::cartridge::Cartridge;
 
 bitflags! {
-    #[derive(Debug)]
+    #[derive(Clone, Copy, PartialEq, Debug)]
     /// Attributes can be applied to the CPU status/flags register.
     pub struct CpuStatusFlags: u8 {
         /// Carry a bit remaining by some instructions.
@@ -112,6 +112,13 @@ enum Instruction {
     SetCarryFlagImplied,
     ClearCarryFlagImplied,
     BranchIfCarrySetRelative,
+    BranchIfCarryClearRelative,
+    BranchIfEqual,
+    BranchIfNotEqual,
+    BranchIfOverflowSet,
+    BranchIfOverflowClear,
+    BranchIfPositive,
+    BranchIfMinus,
 }
 
 #[derive(Debug)]
@@ -288,8 +295,15 @@ impl Cpu {
             Instruction::JumpToSubroutineAbsolute => self.jump_to_subroutine_absolute_cycles(),
             Instruction::NoOperationImplied => self.no_operation_cycles(),
             Instruction::SetCarryFlagImplied => self.set_carry_flag_implied_cycles(),
-            Instruction::BranchIfCarrySetRelative => self.branch_if_carry_set_relative_cycles(),
             Instruction::ClearCarryFlagImplied => self.clear_carry_flag_implied_cycles(),
+            Instruction::BranchIfCarrySetRelative => self.branch_cycles(CpuStatusFlags::Carry, false),
+            Instruction::BranchIfCarryClearRelative => self.branch_cycles(CpuStatusFlags::Carry, true),
+            Instruction::BranchIfEqual => self.branch_cycles(CpuStatusFlags::Zero, false),
+            Instruction::BranchIfNotEqual => self.branch_cycles(CpuStatusFlags::Zero, true),
+            Instruction::BranchIfOverflowSet => self.branch_cycles(CpuStatusFlags::Overflow, false),
+            Instruction::BranchIfOverflowClear => self.branch_cycles(CpuStatusFlags::Overflow, true),
+            Instruction::BranchIfMinus => self.branch_cycles(CpuStatusFlags::Negative, false),
+            Instruction::BranchIfPositive => self.branch_cycles(CpuStatusFlags::Negative, true),
             Instruction::Stub => panic!("The stub instruction should never go beyond step 1!"),
         }?;
 
@@ -320,6 +334,13 @@ impl Cpu {
             0x38 => Instruction::SetCarryFlagImplied,
             0xB0 => Instruction::BranchIfCarrySetRelative,
             0x18 => Instruction::ClearCarryFlagImplied,
+            0x90 => Instruction::BranchIfCarryClearRelative,
+            0xF0 => Instruction::BranchIfEqual,
+            0xD0 => Instruction::BranchIfNotEqual,
+            0x70 => Instruction::BranchIfOverflowSet,
+            0x50 => Instruction::BranchIfOverflowClear,
+            0x30 => Instruction::BranchIfMinus,
+            0x10 => Instruction::BranchIfPositive,
             _ => unimplemented!("The opcode {opcode:02X} is not implemented yet!"),
         }
     }
@@ -333,7 +354,14 @@ impl Cpu {
             Instruction::JumpToSubroutineAbsolute => self.jump_to_subroutine_absolute_instruction(),
             Instruction::NoOperationImplied => self.no_operation_implied_instruction(),
             Instruction::SetCarryFlagImplied => self.set_carry_flag_implied_instruction(),
-            Instruction::BranchIfCarrySetRelative => self.branch_if_carry_set_relative_instruction(),
+            Instruction::BranchIfCarrySetRelative => self.branch_instruction(CpuStatusFlags::Carry, false),
+            Instruction::BranchIfCarryClearRelative => self.branch_instruction(CpuStatusFlags::Carry, true),
+            Instruction::BranchIfEqual => self.branch_instruction(CpuStatusFlags::Zero, false),
+            Instruction::BranchIfNotEqual => self.branch_instruction(CpuStatusFlags::Zero, true),
+            Instruction::BranchIfOverflowSet => self.branch_instruction(CpuStatusFlags::Overflow, false),
+            Instruction::BranchIfOverflowClear => self.branch_instruction(CpuStatusFlags::Overflow, true),
+            Instruction::BranchIfMinus => self.branch_instruction(CpuStatusFlags::Negative, false),
+            Instruction::BranchIfPositive => self.branch_instruction(CpuStatusFlags::Negative, true),
             Instruction::ClearCarryFlagImplied => self.clear_carry_flag_implied_instruction(),
             Instruction::Stub => Ok(InstructionData {
                 arg_1: None,
