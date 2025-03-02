@@ -1,4 +1,4 @@
-//! Holds the implementation of the `LDX` instruction.
+//! Holds the implementation of the `STX` instruction.
 
 use crate::bus::BusError;
 use crate::cpu::Cpu;
@@ -8,8 +8,8 @@ use crate::cpu::InstructionData;
 
 
 impl Cpu {
-    /// Implements the immediate store X register instruction data.
-    pub(super) fn store_x_register_immediate_instruction(&mut self) -> Result<InstructionData, BusError> {
+    /// Implements the zero page store X register instruction data.
+    pub(super) fn store_x_register_zero_page_instruction(&mut self) -> Result<InstructionData, BusError> {
         let arg_1 = self.bus.read(self.program_counter + 1)?;
 
         Ok(InstructionData {
@@ -22,8 +22,8 @@ impl Cpu {
 }
 
 impl_instruction_cycles!(
-    /// Implements the immediate load X register instruction cycles.
-    cpu, store_x_register,
+    /// Implements the zero page store X register instruction cycles.
+    cpu, store_x_register_zero_page_cycles,
 
     2, false => {
         cpu.cache.push(cpu.read_program_counter()?);
@@ -33,7 +33,7 @@ impl_instruction_cycles!(
     3, true => {
         cpu.bus.write(
             build_address(cpu.cache[0], 0x00),
-        cpu.register_x);
+        cpu.register_x)?;
     },
 );
 
@@ -55,7 +55,7 @@ mod tests {
         let mut cpu = Cpu::new(Box::new(cartridge));
         cpu.bus.write(0x00EE, 0xAB).unwrap();
 
-        cpu.quick_cycle();
+        cpu.run_full_instruction();
 
         let instruction_data = cpu.cycle().unwrap().unwrap().instruction_data;
         assert_eq!(instruction_data.assembly, "STX #$EE = AB");

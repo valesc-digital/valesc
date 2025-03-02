@@ -3,15 +3,18 @@
 mod jump;
 mod load_x_register;
 mod store_x_register;
+mod subroutine;
+mod no_operation;
+mod flags;
+mod branching;
 
 use core::panic;
-use std::io::Read;
+use std::cmp::Ordering;
 
 use bitflags::bitflags;
-use log::error;
+use log::{error, trace};
 use thiserror::Error;
 
-use crate::build_address;
 use crate::bus::{Bus, BusError};
 use crate::cartridge::Cartridge;
 
@@ -102,8 +105,13 @@ pub enum CpuError {
 enum Instruction {
     Stub,
     JumpAbsolute,
-    LoadXRegister,
-    StoreXRegister,
+    LoadXRegisterImmediate,
+    StoreXRegisterZeroPage,
+    JumpToSubroutineAbsolute,
+    NoOperationImplied,
+    SetCarryFlagImplied,
+    ClearCarryFlagImplied,
+    BranchIfCarrySetRelative,
 }
 
 #[derive(Debug)]
@@ -164,7 +172,7 @@ pub struct InstructionData {
 pub enum CycleError {
     #[error("The requested instruction step is out of bounds")]
     /// The requested instruction step is out of bounds
-    InstructionStepOutOfBounds,
+    InstructionCycleOutOfBounds,
 
     #[error("Accessing the bus failed: {0}")]
     /// Accessing the bus failed
@@ -219,7 +227,7 @@ macro_rules! impl_instruction_cycles {
                         },
                     )*
     
-                    _ => Err(CycleError::InstructionStepOutOfBounds),
+                    _ => Err(CycleError::InstructionCycleOutOfBounds),
                 }
             }
         }
@@ -257,6 +265,7 @@ impl Cpu {
 
     /// Run a cycle of the CPU.
     pub fn cycle(&mut self) -> Result<Option<CpuSnapshot>, CpuError> {
+        trace!("PC: {:04X}", self.program_counter);
         self.cpu_cycles += 1;
 
         if self.current_instruction_cycle == 1 {
@@ -273,9 +282,14 @@ impl Cpu {
         }
 
         let instruction_ended = match self.current_instruction {
-            Instruction::JumpAbsolute => self.jump_absolute_cycle(),
-            Instruction::LoadXRegister => self.load_x_register(),
-            Instruction::StoreXRegister => self.store_x_register(),
+            Instruction::JumpAbsolute => self.jump_absolute_cycles(),
+            Instruction::LoadXRegisterImmediate => self.load_x_register_immediate_cycles(),
+            Instruction::StoreXRegisterZeroPage => self.store_x_register_zero_page_cycles(),
+            Instruction::JumpToSubroutineAbsolute => self.jump_to_subroutine_absolute_cycles(),
+            Instruction::NoOperationImplied => self.no_operation_cycles(),
+            Instruction::SetCarryFlagImplied => self.set_carry_flag_implied_cycles(),
+            Instruction::BranchIfCarrySetRelative => self.branch_if_carry_set_relative_cycles(),
+            Instruction::ClearCarryFlagImplied => self.clear_carry_flag_implied_cycles(),
             Instruction::Stub => panic!("The stub instruction should never go beyond step 1!"),
         }?;
 
@@ -299,8 +313,13 @@ impl Cpu {
     fn dispatch_opcode(opcode: u8) -> Instruction {
         match opcode {
             0x4C => Instruction::JumpAbsolute,
-            0xA2 => Instruction::LoadXRegister,
-            0x86 => Instruction::StoreXRegister,
+            0xA2 => Instruction::LoadXRegisterImmediate,
+            0x86 => Instruction::StoreXRegisterZeroPage,
+            0x20 => Instruction::JumpToSubroutineAbsolute,
+            0xEA => Instruction::NoOperationImplied,
+            0x38 => Instruction::SetCarryFlagImplied,
+            0xB0 => Instruction::BranchIfCarrySetRelative,
+            0x18 => Instruction::ClearCarryFlagImplied,
             _ => unimplemented!("The opcode {opcode:02X} is not implemented yet!"),
         }
     }
@@ -309,8 +328,13 @@ impl Cpu {
     fn dispatch_instruction(&mut self) -> Result<InstructionData, BusError> {
         match self.current_instruction {
             Instruction::JumpAbsolute => self.jump_absolute_instruction(),
-            Instruction::LoadXRegister => self.load_x_register_immediate_instruction(),
-            Instruction::StoreXRegister => self.store_x_register_immediate_instruction(),
+            Instruction::LoadXRegisterImmediate => self.load_x_register_immediate_instruction(),
+            Instruction::StoreXRegisterZeroPage => self.store_x_register_zero_page_instruction(),
+            Instruction::JumpToSubroutineAbsolute => self.jump_to_subroutine_absolute_instruction(),
+            Instruction::NoOperationImplied => self.no_operation_implied_instruction(),
+            Instruction::SetCarryFlagImplied => self.set_carry_flag_implied_instruction(),
+            Instruction::BranchIfCarrySetRelative => self.branch_if_carry_set_relative_instruction(),
+            Instruction::ClearCarryFlagImplied => self.clear_carry_flag_implied_instruction(),
             Instruction::Stub => Ok(InstructionData {
                 arg_1: None,
                 arg_2: None,
@@ -319,6 +343,35 @@ impl Cpu {
             })
         }
     }
+
+    /// Given a value set the cpu flags related to the positive, negative or zero value
+    /// of the given number.
+    fn set_signedness(&mut self, value: u8) {
+        match (value as i8).cmp(&0) {
+            Ordering::Greater => {
+                self.status -= CpuStatusFlags::Negative;
+                self.status -= CpuStatusFlags::Zero;
+            }
+
+            Ordering::Equal => {
+                self.status |= CpuStatusFlags::Zero;
+                self.status -= CpuStatusFlags::Negative;
+            }
+
+            Ordering::Less => {
+                self.status |= CpuStatusFlags::Negative;
+                self.status -= CpuStatusFlags::Zero;
+            }
+        }
+    }
+
+    /// Push a value to the stack.
+    fn stack_push(&mut self, value: u8) -> Result<(), BusError> {
+        self.bus.write(STACK_ADDRESS + self.stack_pointer as u16, value)?;
+        self.stack_pointer -= 1;
+
+        Ok(())
+    }
 }
 
 
@@ -326,7 +379,6 @@ impl Cpu {
 mod tests {
     use super::*;
 
-    pub(crate) const NOP: u8 = 0xEA;
     const DEFAULT_PROGRAM_COUNTER: usize = 0x8000;
 
     pub(crate) struct MockCartridge {
@@ -341,7 +393,7 @@ mod tests {
 
     impl Cartridge for MockCartridge {
         unsafe fn read(&self, address: u16) -> Result<u8, crate::cartridge::CartridgeError> {
-            Ok(self.prg_data[address as usize - DEFAULT_PROGRAM_COUNTER])
+            Ok(self.prg_data.get(address as usize - DEFAULT_PROGRAM_COUNTER).copied().unwrap_or(0xEA))
         }
 
         unsafe fn write(
@@ -354,7 +406,7 @@ mod tests {
     }
 
     impl Cpu {
-        pub(crate) fn quick_cycle(&mut self) -> InstructionData {
+        pub(crate) fn run_full_instruction(&mut self) -> InstructionData {
             let instruction_data = self.cycle().unwrap().unwrap().instruction_data;
 
             for _ in 0..instruction_data.idle_cycles {
@@ -364,9 +416,9 @@ mod tests {
             instruction_data
         }
 
-        pub(crate) fn batch_cycle(&mut self, num_of_steps: usize) {
-            for _ in 0..num_of_steps {
-                self.quick_cycle();
+        pub(crate) fn batch_run_full_instruction(&mut self, num_of_instructions: usize) {
+            for _ in 0..num_of_instructions {
+                self.run_full_instruction();
             }
         }
     }

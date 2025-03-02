@@ -17,20 +17,20 @@ pub(crate) fn build_address(lower_byte: u8, upper_byte: u8) -> u16 {
 /// Extension methods for the [u16] type.
 trait U16Ex {
     /// Get the least significant byte of the [u16].
-    fn get_lower_byte(&self) -> u8;
+    fn lower_byte(&self) -> u8;
 
     /// Get the most significant byte of the [u16].
-    fn get_upper_byte(&self) -> u8;
+    fn upper_byte(&self) -> u8;
 }
 
 impl U16Ex for u16 {
     #[inline(always)]
-    fn get_lower_byte(&self) -> u8 {
+    fn lower_byte(&self) -> u8 {
         (self & 0x00FF) as u8
     }
 
     #[inline(always)]
-    fn get_upper_byte(&self) -> u8 {
+    fn upper_byte(&self) -> u8 {
         ((self & 0xFF00) >> 8) as u8
     }
 }
@@ -46,11 +46,11 @@ mod tests {
 
     #[test]
     fn test_u16_get_lower_byte() {
-        assert_eq!(0xFF00_u16.get_lower_byte(), 0x00);
+        assert_eq!(0xFF00_u16.lower_byte(), 0x00);
     }
 
     #[test]
     fn test_u16_get_upper_byte() {
-        assert_eq!(0xFF00_u16.get_upper_byte(), 0xFF);
+        assert_eq!(0xFF00_u16.upper_byte(), 0xFF);
     }
 }

@@ -1,4 +1,9 @@
 # TODO
+IMPLEMENT $18/CLC.
+ADD DRY.
+
+- :#02X should be :#04X
+- :#04X should be :#06X DUE TO the `#`.
 - Modules to refactor:
     - ines.rs
 - CHECK DISCORD AND FINISH BRANCH IF CARRY

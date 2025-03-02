@@ -28,7 +28,7 @@ impl Cpu {
 
 impl_instruction_cycles!(
     /// Implements the absolute jump instruction cycles.
-    cpu, jump_absolute_cycle,
+    cpu, jump_absolute_cycles,
 
     2, false => {
         cpu.cache.push(cpu.read_program_counter()?);
