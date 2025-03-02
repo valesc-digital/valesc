@@ -11,13 +11,11 @@
 
 use std::fs::File;
 use std::io::Write;
-use std::time::Instant;
 
 use env_logger::fmt::style::{AnsiColor, Style};
 use env_logger::Env;
 use tinfo::cpu::Cpu;
 use tinfo::rom::ines::InesFile;
-use tinfo::bus::Bus;
 
 fn main() {
     // Set the minimum log level to `warn`
@@ -47,11 +45,26 @@ fn main() {
     let mut rom_file = File::open("nestest.nes").unwrap();
     let cartridge = InesFile::from_read(&mut rom_file).unwrap();
 
-    let mut cpu = Cpu::new(cartridge);
-
-    let mut last_cycle = Instant::now();
+    let mut cpu = Cpu::new_with_program_counter(cartridge, 0xC000);
 
     loop {
-        let _ = cpu.cycle();
+        if let Some(cpu_snapshot) = cpu.cycle().unwrap() {
+            let log_padding = " ".repeat(32 - cpu_snapshot.instruction_data.assembly.len());
+
+            println!(
+                "{:04X}  {:02X} {} {}  {}{log_padding}A:{:02X} X:{:02X} Y:{:02X} P:{:02} SP:{:02X} PPU:  0,  0 CYC:{}",
+                cpu_snapshot.program_counter,
+                cpu_snapshot.opcode,
+                cpu_snapshot.instruction_data.arg_1.map(|arg| format!("{arg:02X}")).unwrap_or(String::from("  ")),
+                cpu_snapshot.instruction_data.arg_2.map(|arg| format!("{arg:02X}")).unwrap_or(String::from("  ")),
+                cpu_snapshot.instruction_data.assembly,
+                cpu_snapshot.accumulator,
+                cpu_snapshot.register_x,
+                cpu_snapshot.register_y,
+                cpu_snapshot.status,
+                cpu_snapshot.stack_pointer,
+                cpu_snapshot.cpy_cycles
+            );
+        }
     }
 }

@@ -1,8 +1,6 @@
 //! Holds the implementation of a memory bus for the NES.
 
-use std::cell::RefCell;
 use std::io::Read;
-use std::rc::Rc;
 use std::time::Instant;
 
 use log::trace;
@@ -10,7 +8,6 @@ use rand::prelude::*;
 use thiserror::Error;
 
 use crate::cartridge::{Cartridge, CartridgeError};
-use crate::cpu::{self, Cpu, CpuError};
 use crate::BYTES_ON_A_KIBIBYTE;
 
 /// The address of the first byte of the CPU RAM.
@@ -78,11 +75,12 @@ impl Bus {
         // The CPU RAM should be randomized to emulate the undefined state of the bits on startup,
         // used on some games as a pseudo RNG
 
-        let rng = rand::rng();
-        let cpu_ram: Vec<u8> = rng.random_iter().take(2 * BYTES_ON_A_KIBIBYTE).collect();
+        //let rng = rand::rng();
+        //let cpu_ram: Vec<u8> = rng.random_iter().take(2 * BYTES_ON_A_KIBIBYTE).collect();
 
         Bus {
-            cpu_ram: cpu_ram.try_into().unwrap(),
+            //cpu_ram: cpu_ram.try_into().unwrap(),
+            cpu_ram: [0; 2 * BYTES_ON_A_KIBIBYTE],
             cartridge,
             last_cpu_cycle: Instant::now(),
             cpu_response: None,
